@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>ปิงปอง AR</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Mali:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --accent:#ff7a3d; --accent2:#2f80ed; --ink:#1f2a36; --soft:#5f6f80; --card:rgba(255,255,255,.96); }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; }
+  body { background:#0f1720; font-family:'Mali', system-ui, sans-serif; color:#fff;
+         touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  #game { position:absolute; top:0; left:0; display:block; }
+  button, select { font:inherit; }
+
+  .hud { position:fixed; z-index:10; left:0; right:0; top:0; display:flex; align-items:center; justify-content:space-between;
+         gap:8px; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; pointer-events:none; }
+  .score { display:flex; align-items:center; gap:10px; background:rgba(15,23,32,.7); padding:6px 14px; border-radius:999px;
+           font-weight:700; font-size:1.15rem; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  .score .you { color:#ff9a6b; } .score .ai { color:#7db4ff; }
+  .icon-btn { pointer-events:auto; border:0; border-radius:999px; padding:8px 14px; background:rgba(15,23,32,.7); color:#fff;
+              font-weight:700; cursor:pointer; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  .msg { position:fixed; z-index:10; left:50%; bottom:calc(28px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+         background:rgba(15,23,32,.78); padding:10px 18px; border-radius:16px; font-weight:700; text-align:center;
+         max-width:calc(100% - 32px); pointer-events:none; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  .msg:empty { display:none; }
+
+  .overlay { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; padding:16px;
+             background:radial-gradient(circle at 20% 0%, #2a3d55 0, transparent 50%), radial-gradient(circle at 100% 100%, #4a2a22 0, transparent 45%), #0f1720;
+             overflow-y:auto; touch-action:pan-y; }
+  .overlay.dim { background:rgba(10,15,22,.55); }
+  .overlay[hidden] { display:none; }
+  .card { width:100%; max-width:440px; background:var(--card); color:var(--ink); border-radius:24px; padding:20px 18px;
+          box-shadow:0 20px 50px rgba(0,0,0,.35); margin:auto; }
+  .card h1 { margin:0 0 4px; font-size:1.6rem; text-align:center; }
+  .card h2 { margin:0 0 6px; font-size:1.4rem; text-align:center; }
+  .sub { margin:0 0 14px; text-align:center; color:var(--soft); font-size:.92rem; line-height:1.5; }
+  .field { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0; font-weight:700; font-size:.95rem; }
+  .field select { border:2px solid #e3e8ee; border-radius:12px; padding:6px 10px; background:#fff; color:var(--ink); }
+  .btn { display:block; width:100%; border:0; border-radius:16px; padding:13px 16px; margin-top:10px; font-weight:700; font-size:1.05rem;
+         cursor:pointer; color:#fff; background:var(--accent); box-shadow:0 6px 16px rgba(255,122,61,.35); }
+  .btn.alt { background:#e9eef4; color:var(--ink); box-shadow:none; }
+  .steps { margin:14px 0 0; padding-left:20px; font-size:.88rem; line-height:1.65; color:#3a4856; }
+  .note { font-size:.82rem; color:var(--soft); margin:10px 0 0; line-height:1.5; text-align:center; }
+  .note a { color:var(--accent2); font-weight:700; }
+  .err { color:#c0392b; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+  "arjs": "https://cdn.jsdelivr.net/npm/@ar-js-org/ar.js@3.4.8/three.js/build/ar-threex.mjs"
+} }
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div class="hud" id="hud" hidden>
+  <div class="score"><span class="you">คุณ <span id="sYou">0</span></span><span>:</span><span class="ai"><span id="sAi">0</span> AI</span></div>
+  <button class="icon-btn" id="menuBtn">⏸ เมนู</button>
+</div>
+<div class="msg" id="msg"></div>
+
+<div class="overlay" id="start">
+  <div class="card">
+    <h1>🏓 ปิงปอง AR</h1>
+    <p class="sub">วางโต๊ะปิงปองบนโต๊ะจริงผ่านกล้องมือถือ แล้วสู้กับ AI</p>
+    <div class="field"><label for="level">ระดับ AI</label>
+      <select id="level"><option value="easy">ง่าย</option><option value="medium" selected>ปานกลาง</option><option value="hard">ยาก</option></select></div>
+    <div class="field"><label for="win">แต้มที่ชนะ</label>
+      <select id="win"><option>5</option><option selected>7</option><option>11</option></select></div>
+    <div class="field"><label for="size">ขนาดโต๊ะใน AR</label>
+      <select id="size"><option value="1" selected>เล็ก</option><option value="1.6">กลาง</option><option value="2.5">ใหญ่</option></select></div>
+    <button class="btn" id="arBtn">📷 เริ่มเล่นแบบ AR</button>
+    <button class="btn alt" id="demoBtn">🎮 ทดลองเล่น (ไม่ใช้กล้อง)</button>
+    <ol class="steps">
+      <li>เปิด <a href="marker.html" target="_blank">สัญลักษณ์ Hiro</a> แล้วพิมพ์ หรือเปิดไว้บนจออีกเครื่อง</li>
+      <li>วางสัญลักษณ์บนโต๊ะ ยืนฝั่งที่อ่านตัวอักษรได้ตรง ๆ</li>
+      <li>ส่องกล้องให้เห็นสัญลักษณ์ทั้งแผ่น โต๊ะปิงปองจะโผล่ขึ้นมา</li>
+      <li>ลากนิ้วซ้าย–ขวาเพื่อขยับไม้ แตะหน้าจอเพื่อเสิร์ฟ</li>
+    </ol>
+    <p class="note" id="startNote">ต้องอนุญาตให้ใช้กล้อง (iPhone ใช้ Safari, Android ใช้ Chrome)</p>
+  </div>
+</div>
+
+<div class="overlay dim" id="pause" hidden>
+  <div class="card">
+    <h2 id="pauseTitle">พักเกม</h2>
+    <p class="sub" id="pauseSub"></p>
+    <button class="btn" id="resumeBtn">▶ เล่นต่อ</button>
+    <button class="btn alt" id="restartBtn">🔄 เริ่มเกมใหม่</button>
+    <button class="btn alt" id="homeBtn">🏠 กลับหน้าแรก</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { ArToolkitSource, ArToolkitContext, ArMarkerControls } from 'arjs';
+
+// ---------- dimensions (1 unit = width of the Hiro marker) ----------
+const W = 1.5, L = 2.7, HALF = L / 2, TOP = 0.3, NET_H = 0.1, BALL_R = 0.035;
+const PAD_R = 0.13, PAD_REACH = 0.17;              // paddle face radius, half-width that can hit
+const PAD_Y = 0.12;                                  // paddle centre height above table top
+const PLAYER_Z = HALF + 0.12, AI_Z = -(HALF + 0.12);
+const BASE_SPEED = 1.9, MAX_SPEED = 4.2, SPEEDUP = 1.045;
+const LEVELS = {
+  // miss: base chance the AI misjudges a return (grows with ball speed and wide shots)
+  easy:   { speed: 1.1, err: 0.08, react: 0.25, aim: 0.25, miss: 0.30 },
+  medium: { speed: 1.6, err: 0.06, react: 0.16, aim: 0.33, miss: 0.17 },
+  hard:   { speed: 2.4, err: 0.04, react: 0.10, aim: 0.40, miss: 0.08 },
+};
+
+const $ = id => document.getElementById(id);
+const canvas = $('game');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+const root = new THREE.Group();     // marker root in AR, plain group in demo
+const game = new THREE.Group();     // the table and everything on it
+root.add(game); scene.add(root);
+let camera = null;
+
+// ---------- scene ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(1, 3, 2); scene.add(sun);
+
+const std = (color, rough = 0.6) => new THREE.MeshStandardMaterial({ color, roughness: rough });
+const box = (w, h, d, mat) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+
+const tableTop = box(W, 0.04, L, std(0x1d5fae, 0.5)); tableTop.position.y = TOP - 0.02; game.add(tableTop);
+const lineMat = std(0xffffff, 0.4), LT = 0.012;
+for (const [w, d, x, z] of [[W, LT, 0, HALF - LT / 2], [W, LT, 0, -HALF + LT / 2], [LT, L, W / 2 - LT / 2, 0], [LT, L, -W / 2 + LT / 2, 0], [LT / 2, L, 0, 0]]) {
+  const m = box(w, 0.002, d, lineMat); m.position.set(x, TOP + 0.001, z); game.add(m);
+}
+const legMat = std(0x333a44, 0.7);
+for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+  const leg = box(0.05, TOP - 0.04, 0.05, legMat); leg.position.set(sx * (W / 2 - 0.1), (TOP - 0.04) / 2, sz * (HALF - 0.15)); game.add(leg);
+}
+const net = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.1, NET_H),
+  new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+net.position.set(0, TOP + NET_H / 2, 0); game.add(net);
+const netTop = box(W + 0.1, 0.012, 0.012, lineMat); netTop.position.set(0, TOP + NET_H, 0); game.add(netTop);
+for (const sx of [-1, 1]) { const p = box(0.02, NET_H + 0.02, 0.02, legMat); p.position.set(sx * (W / 2 + 0.05), TOP + NET_H / 2, 0); game.add(p); }
+
+function makePaddle(color) {
+  const g = new THREE.Group();
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(PAD_R, PAD_R, 0.02, 32), std(color, 0.55));
+  face.rotation.x = Math.PI / 2; g.add(face);
+  const handle = box(0.04, 0.12, 0.03, std(0xc8945a, 0.7)); handle.position.y = -PAD_R - 0.05; g.add(handle);
+  g.position.y = TOP + PAD_Y; game.add(g); return g;
+}
+const youPad = makePaddle(0xe03a3a); youPad.position.z = PLAYER_Z;
+const aiPad = makePaddle(0x2b2b33); aiPad.position.z = AI_Z;
+
+const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 24, 16), std(0xff8a1f, 0.35)); game.add(ballMesh);
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(BALL_R * 1.1, 24),
+  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2; game.add(shadow);
+
+// ---------- sound ----------
+let audio = null;
+function beep(freq, dur = 0.06, vol = 0.15) {
+  if (!audio) return;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, audio.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + dur);
+  o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + dur);
+}
+
+// ---------- game state ----------
+const S = {
+  mode: null, state: 'menu',            // menu | serve | play | point | over
+  you: 0, ai: 0, server: 'you', servesLeft: 2, win: 7, level: LEVELS.medium,
+  ball: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, g: 4, bounces: 0, owner: 'you' },
+  rally: 0, speed: BASE_SPEED, timer: 0,
+  youX: 0, youTarget: 0, youVel: 0, aiX: 0, aiTarget: 0, aiThink: 0, aiMiss: 0,
+  lost: false, seen: 0, paused: false,
+};
+if (new URLSearchParams(location.search).has('debug')) window.__pong = S;   // test hook
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const setMsg = t => { $('msg').textContent = t; };
+
+function updateScore() { $('sYou').textContent = S.you; $('sAi').textContent = S.ai; }
+
+function newMatch() {
+  S.you = 0; S.ai = 0; S.server = 'you'; S.servesLeft = 2; S.youX = S.youTarget = 0; S.aiX = S.aiTarget = 0;
+  updateScore(); prepareServe();
+}
+
+function prepareServe() {
+  S.state = 'serve'; S.rally = 0; S.speed = BASE_SPEED; S.timer = S.server === 'ai' ? 1.0 : 0;
+  placeBallAtServer();
+  setMsg(S.server === 'you' ? 'แตะหน้าจอเพื่อเสิร์ฟ' : 'AI กำลังเสิร์ฟ…');
+}
+
+function placeBallAtServer() {
+  const b = S.ball, you = S.server === 'you';
+  b.x = you ? S.youX : S.aiX; b.z = you ? HALF - 0.02 : -HALF + 0.02; b.y = 0.16; b.bounces = 0;
+}
+
+// Fire the ball from (x0, z0) so it clears the net and bounces once on the far half at targetX.
+function shoot(owner, x0, z0, targetX) {
+  const dir = owner === 'you' ? -1 : 1;
+  const zt = dir * HALF * (0.45 + Math.random() * 0.4);
+  const dx = targetX - x0, dz = zt - z0, tb = Math.hypot(dx, dz) / S.speed;
+  const vx = dx / tb, vz = dz / tb, tn = -z0 / vz;           // time to reach the net
+  const h0 = 0.12, hn = NET_H + 0.07 + Math.random() * 0.07;
+  const g = 2 * (hn - h0 * (1 - tn / tb)) / (tn * (tb - tn));
+  Object.assign(S.ball, { x: x0, y: h0, z: z0, vx, vz, g, vy: (0.5 * g * tb * tb - h0) / tb, bounces: 0, owner });
+  S.state = 'play'; setMsg('');
+  beep(owner === 'you' ? 620 : 520);
+}
+
+function pointTo(who) {
+  if (who === 'you') S.you++; else S.ai++;
+  updateScore(); beep(who === 'you' ? 880 : 220, 0.18, 0.12);
+  if (S.you >= S.win || S.ai >= S.win) {
+    S.state = 'over'; S.timer = 1.0;
+    setMsg(S.you > S.ai ? '🎉 คุณชนะ!' : 'AI ชนะ ลองใหม่นะ');
+    return;
+  }
+  if (--S.servesLeft <= 0) { S.server = S.server === 'you' ? 'ai' : 'you'; S.servesLeft = 2; }
+  S.state = 'point'; S.timer = 1.1;
+  setMsg(who === 'you' ? 'ได้แต้ม! 👍' : 'เสียแต้ม 😅');
+}
+
+function aiDecide() {
+  const b = S.ball, lv = S.level;
+  if (S.state === 'play' && b.vz < 0) {
+    const t = (AI_Z - b.z) / b.vz;
+    S.aiTarget = b.x + b.vx * t + S.aiMiss + (Math.random() * 2 - 1) * lv.err;
+  } else if (S.state === 'serve' && S.server === 'ai') {
+    S.aiTarget = (Math.random() * 2 - 1) * 0.3;
+  } else {
+    S.aiTarget = S.aiTarget * 0.9;
+  }
+  S.aiTarget = clamp(S.aiTarget, -W / 2 - 0.2, W / 2 + 0.2);
+}
+
+function step(dt) {
+  // player paddle follows the finger
+  const prev = S.youX;
+  S.youX += (S.youTarget - S.youX) * Math.min(1, dt * 18);
+  S.youVel = (S.youX - prev) / Math.max(dt, 1e-3);
+
+  // AI paddle
+  S.aiThink -= dt;
+  if (S.aiThink <= 0) { aiDecide(); S.aiThink = S.level.react; }
+  const maxMove = S.level.speed * dt;
+  S.aiX += clamp(S.aiTarget - S.aiX, -maxMove, maxMove);
+
+  const b = S.ball;
+  if (S.state === 'serve') {
+    placeBallAtServer();
+    if (S.server === 'ai' && (S.timer -= dt) <= 0) {
+      const tx = clamp(-S.youX * 0.6 + (Math.random() * 2 - 1) * W * 0.3, -W * 0.4, W * 0.4);
+      shoot('ai', b.x, b.z, tx);
+    }
+  } else if (S.state === 'play' || S.state === 'point') {
+    b.x += b.vx * dt; b.z += b.vz * dt; b.vy -= b.g * dt; b.y += b.vy * dt;
+    const overTable = Math.abs(b.x) <= W / 2 && Math.abs(b.z) <= HALF;
+    if (b.y <= 0 && b.vy < 0 && overTable) { b.y = 0; b.vy = -b.vy * 0.8; b.bounces++; beep(330, 0.04, 0.1); }
+    if (S.state === 'play') {
+      if (b.owner === 'you' && b.z <= AI_Z) {
+        if (b.bounces > 0 && Math.abs(b.x - S.aiX) <= PAD_REACH + BALL_R) {
+          S.rally++; S.speed = Math.min(MAX_SPEED, S.speed * SPEEDUP);
+          const aim = S.level.aim * W;
+          const away = S.youX > 0 ? -1 : 1;
+          const tx = clamp(away * Math.random() * aim + (Math.random() * 2 - 1) * 0.15, -W * 0.42, W * 0.42);
+          shoot('ai', b.x, AI_Z, tx);
+        } else pointTo('you');
+      } else if (b.owner === 'ai' && b.z >= PLAYER_Z) {
+        if (b.bounces > 0 && Math.abs(b.x - S.youX) <= PAD_REACH + BALL_R) {
+          S.rally++; S.speed = Math.min(MAX_SPEED, S.speed * SPEEDUP);
+          const off = clamp((b.x - S.youX) / (PAD_REACH + BALL_R), -1, 1);
+          const tx = clamp(off * W * 0.46 + clamp(S.youVel, -3, 3) * 0.06, -W * 0.46, W * 0.46);
+          // decide now whether the AI will misjudge this return
+          const chance = S.level.miss * (S.speed / BASE_SPEED) + (Math.abs(off) > 0.6 ? 0.12 : 0);
+          S.aiMiss = Math.random() < chance ? (Math.random() < 0.5 ? -1 : 1) * (PAD_REACH + BALL_R + 0.05 + Math.random() * 0.15) : 0;
+          shoot('you', b.x, PLAYER_Z, tx);
+        } else pointTo('ai');
+      }
+    } else if ((S.timer -= dt) <= 0) prepareServe();
+  } else if (S.state === 'over') {
+    if ((S.timer -= dt) <= 0 && $('pause').hidden) showPause(true);
+  }
+}
+
+function draw() {
+  youPad.position.x = S.youX; aiPad.position.x = S.aiX;
+  youPad.rotation.z = clamp(-S.youVel * 0.08, -0.5, 0.5);
+  const b = S.ball;
+  ballMesh.visible = S.state !== 'menu';
+  ballMesh.position.set(b.x, TOP + BALL_R + b.y, b.z);
+  const over = Math.abs(b.x) <= W / 2 && Math.abs(b.z) <= HALF && b.y > -0.01;
+  shadow.visible = ballMesh.visible && over;
+  shadow.position.set(b.x, TOP + 0.003, b.z);
+  const s = 1 / (1 + b.y * 3); shadow.scale.set(s, s, s); shadow.material.opacity = 0.35 * s;
+}
+
+// ---------- input: finger -> point on the table ----------
+const ray = { o: new THREE.Vector3(), f: new THREE.Vector3(), inv: new THREE.Matrix4() };
+function pointerToTableX(cx, cy) {
+  if (!camera) return null;
+  const r = canvas.getBoundingClientRect();
+  const nx = (cx - r.left) / r.width * 2 - 1, ny = -(cy - r.top) / r.height * 2 + 1;
+  camera.updateMatrixWorld(); camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+  ray.o.set(nx, ny, -1).unproject(camera); ray.f.set(nx, ny, 1).unproject(camera);
+  game.updateMatrixWorld(); ray.inv.copy(game.matrixWorld).invert();
+  ray.o.applyMatrix4(ray.inv); ray.f.applyMatrix4(ray.inv);
+  const dy = ray.f.y - ray.o.y, h = TOP + PAD_Y;
+  if (Math.abs(dy) < 1e-6) return null;
+  const t = (h - ray.o.y) / dy;
+  if (!(t > 0)) return null;
+  return ray.o.x + (ray.f.x - ray.o.x) * t;
+}
+function onPointer(e) {
+  if (S.state === 'menu' || S.paused) return;
+  let x = pointerToTableX(e.clientX, e.clientY);
+  if (x === null || !isFinite(x)) x = (e.clientX / innerWidth - 0.5) * W * 1.4;
+  S.youTarget = clamp(x, -W / 2 - 0.2, W / 2 + 0.2);
+}
+canvas.addEventListener('pointermove', onPointer);
+canvas.addEventListener('pointerdown', e => {
+  onPointer(e);
+  if (S.state === 'serve' && S.server === 'you' && !S.lost) {
+    const tx = clamp(-S.youX * 0.5 + (Math.random() * 2 - 1) * W * 0.25, -W * 0.4, W * 0.4);
+    S.aiMiss = Math.random() < S.level.miss * 0.5 ? (Math.random() < 0.5 ? -1 : 1) * (PAD_REACH + BALL_R + 0.08) : 0;
+    shoot('you', S.ball.x, S.ball.z, tx);
+  }
+});
+
+// ---------- demo mode (no camera) ----------
+function startDemo() {
+  S.mode = 'demo'; game.scale.setScalar(1);
+  camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.01, 100);
+  scene.add(camera);
+  scene.background = new THREE.Color(0x1a2633);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(4, 48), std(0x2a3a4c, 0.9));
+  floor.rotation.x = -Math.PI / 2; floor.name = 'floor'; scene.add(floor);
+  resizeDemo(); begin();
+}
+function resizeDemo() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  const portrait = innerHeight > innerWidth;
+  camera.position.set(0, TOP + (portrait ? 2.6 : 1.5), HALF + (portrait ? 2.4 : 1.9));
+  camera.lookAt(0, TOP, portrait ? -0.1 : 0);
+  camera.updateProjectionMatrix();
+}
+
+// ---------- AR mode (AR.js marker tracking) ----------
+let arSource = null, arContext = null;
+function startAR() {
+  S.mode = 'ar';
+  game.scale.setScalar(parseFloat($('size').value));
+  scene.background = null;
+  camera = new THREE.Camera(); scene.add(camera);
+  root.matrixAutoUpdate = false; root.visible = false;
+  $('startNote').textContent = 'กำลังเปิดกล้อง…'; $('startNote').classList.remove('err');
+
+  arSource = new ArToolkitSource({ sourceType: 'webcam', sourceWidth: 640, sourceHeight: 480 });
+  arSource.init(() => {
+    arSource.domElement.addEventListener('canplay', () => { initARContext(); resizeAR(); begin(); }, { once: true });
+    setTimeout(resizeAR, 1500);
+  }, err => {
+    S.mode = null; camera = null;
+    $('startNote').textContent = 'เปิดกล้องไม่ได้: ' + (err && (err.message || err.name) || 'ไม่ทราบสาเหตุ') + ' — ตรวจสอบว่าอนุญาตให้ใช้กล้อง หรือลองโหมดทดลองเล่น';
+    $('startNote').classList.add('err');
+  });
+}
+function sourceOrientation() {
+  const v = arSource.domElement;
+  return v.videoWidth > v.videoHeight ? 'landscape' : 'portrait';
+}
+function initARContext() {
+  arContext = new ArToolkitContext({ cameraParametersUrl: 'data/camera_para.dat', detectionMode: 'mono' });
+  arContext.init(() => {
+    camera.projectionMatrix.copy(arContext.getProjectionMatrix());
+    arContext.arController.orientation = sourceOrientation();
+    arContext.arController.options.orientation = sourceOrientation();
+    resizeAR();
+  });
+  new ArMarkerControls(arContext, root, {
+    type: 'pattern', patternUrl: 'data/patt.hiro', changeMatrixMode: 'modelViewMatrix',
+    smooth: true, smoothCount: 5, smoothTolerance: 0.01, smoothThreshold: 2,
+  });
+}
+function resizeAR() {
+  if (!arSource || !arSource.ready) return;
+  arSource.onResizeElement();
+  const vs = arSource.domElement.style;
+  const w = parseFloat(vs.width), h = parseFloat(vs.height);
+  if (w > 0 && h > 0) {
+    renderer.setSize(w, h, false);
+    canvas.style.width = vs.width; canvas.style.height = vs.height;
+    canvas.style.marginLeft = vs.marginLeft; canvas.style.marginTop = vs.marginTop;
+  }
+  if (arContext && arContext.arController) arSource.copyElementSizeTo(arContext.arController.canvas);
+}
+
+addEventListener('resize', () => { if (S.mode === 'demo') resizeDemo(); else if (S.mode === 'ar') resizeAR(); });
+
+// ---------- flow ----------
+function unlockAudio() {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) { audio = null; }
+}
+function readSettings() { S.level = LEVELS[$('level').value]; S.win = parseInt($('win').value, 10); }
+function begin() {
+  $('start').hidden = true; $('hud').hidden = false; newMatch();
+}
+function showPause(over) {
+  S.paused = true; $('pause').hidden = false;
+  $('resumeBtn').hidden = !!over;
+  $('pauseTitle').textContent = over ? (S.you > S.ai ? '🎉 คุณชนะ!' : '🤖 AI ชนะ') : 'พักเกม';
+  $('pauseSub').textContent = `คะแนน คุณ ${S.you} : ${S.ai} AI`;
+}
+$('arBtn').onclick = () => { unlockAudio(); readSettings(); startAR(); };
+$('demoBtn').onclick = () => { unlockAudio(); readSettings(); startDemo(); };
+$('menuBtn').onclick = () => showPause(false);
+$('resumeBtn').onclick = () => { S.paused = false; $('pause').hidden = true; };
+$('restartBtn').onclick = () => { S.paused = false; $('pause').hidden = true; newMatch(); };
+$('homeBtn').onclick = () => location.reload();
+
+// ---------- main loop ----------
+let last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (S.mode === 'ar' && arSource && arSource.ready && arContext && arContext.arController) arContext.update(arSource.domElement);
+
+  if (S.mode === 'ar' && S.state !== 'menu') {
+    // pause the rally while the marker is out of view, resume shortly after it returns
+    if (!root.visible) { S.lost = true; S.seen = 0; }
+    else if (S.lost && (S.seen += dt) > 0.4) S.lost = false;
+    if (S.lost) setMsg('🔍 ส่องกล้องให้เห็นสัญลักษณ์ Hiro');
+    else if ($('msg').textContent.startsWith('🔍')) setMsg(S.state === 'serve' && S.server === 'you' ? 'แตะหน้าจอเพื่อเสิร์ฟ' : '');
+  }
+  if (S.mode && S.state !== 'menu' && !S.paused && !S.lost) step(dt);
+  draw();
+  if (camera) renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
